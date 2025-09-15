@@ -29,7 +29,11 @@ export async function POST(req: Request) {
     const opts = body?.options || {}; // { timeout, blockResources, screenshot, postWait, userAgent }
 
     if (!url) return NextResponse.json({ error: "Missing `url` in request body" }, { status: 400 });
-    try { new URL(url); } catch { return NextResponse.json({ error: "Invalid URL" }, { status: 400 }); }
+    try {
+      new URL(url);
+    } catch {
+      return NextResponse.json({ error: "Invalid URL" }, { status: 400 });
+    }
 
     const browser = await getBrowser();
     const context = await (await browser).newContext({
@@ -69,6 +73,15 @@ export async function POST(req: Request) {
     const reader = new Readability(doc as any);
     const article = reader.parse(); // may be null
 
+    // ✨ FIX START: Clean up the text content for proper spacing and paragraph breaks.
+    const rawTextContent = article?.textContent || "";
+    const cleanedTextContent = rawTextContent
+      .split('\n')                  // 1. Split text into an array of lines
+      .map(line => line.trim())     // 2. Trim whitespace from the start and end of each line
+      .filter(line => line.length > 0) // 3. Remove any lines that are now empty
+      .join('\n\n');                // 4. Join the lines back together with double newlines
+    // ✨ FIX END
+
     const getMeta = (name: string) =>
       doc.querySelector(`meta[name="${name}"]`)?.getAttribute("content") ||
       doc.querySelector(`meta[property="${name}"]`)?.getAttribute("content") ||
@@ -81,7 +94,11 @@ export async function POST(req: Request) {
 
     // JSON-LD structured data
     const jsonLd = Array.from(doc.querySelectorAll('script[type="application/ld+json"]')).map((s) => {
-      try { return JSON.parse(s.textContent || ""); } catch { return s.textContent || null; }
+      try {
+        return JSON.parse(s.textContent || "");
+      } catch {
+        return s.textContent || null;
+      }
     }).filter(Boolean);
 
     // links, headings, images (unique, limited)
@@ -99,7 +116,7 @@ export async function POST(req: Request) {
       .map((i) => ({ src: (i as HTMLImageElement).src, alt: i.getAttribute("alt") || "" }))
       .slice(0, 500);
 
-    const mainText = (article?.textContent || doc.body?.textContent || "").trim();
+    const mainText = (cleanedTextContent || doc.body?.textContent || "").trim();
     const wordCount = mainText ? mainText.split(/\s+/).filter(Boolean).length : 0;
     const readingTimeMinutes = Math.max(1, Math.ceil(wordCount / 200));
 
@@ -113,7 +130,12 @@ export async function POST(req: Request) {
       ogImage,
       jsonLd,
       article: article
-        ? { title: article.title, excerpt: article.excerpt, content: article.content, textContent: article.textContent }
+        ? {
+            title: article.title,
+            excerpt: article.excerpt,
+            content: article.content,
+            textContent: cleanedTextContent,
+          }
         : null,
       links: uniqueLinks,
       headings,
